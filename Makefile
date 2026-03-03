@@ -81,11 +81,11 @@ debug: build
 
 # ---------- 清理 ----------
 clean:
-	@rm -rf $(BUILD_DIR) build-linux test/
+	@rm -rf $(BUILD_DIR) build-linux examples/asm examples/ir examples/ast examples/debug examples/verify_temp
 
 clean-test:
-	@rm -rf test/
-	@echo "Cleaned test/ directory."
+	@rm -rf examples/asm examples/ir examples/ast examples/debug examples/verify_temp
+	@echo "Cleaned generated output directories."
 
 rebuild: clean build
 
@@ -108,7 +108,7 @@ help:
 	@echo "  make verify       End-to-end verify (asm → link → emulate → diff)"
 	@echo "  make debug FILE=xx.c  Single-file debug (AST/IR/ASM + verify)"
 	@echo "  make setup-spike  (macOS) Build rv32 proxy kernel for spike"
-	@echo "  make clean        Remove build/ and test/"
-	@echo "  make clean-test   Remove test/ only (keep build/)"
+	@echo "  make clean        Remove build/ and generated outputs under examples/"
+	@echo "  make clean-test   Remove generated outputs under examples/ only (keep build/)"
 	@echo "  make rebuild      Clean then build"
 	@echo "  make help         This message"

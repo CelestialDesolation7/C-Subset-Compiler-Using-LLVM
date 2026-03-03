@@ -14,7 +14,7 @@ fi
 SRC_DIR="${1:-examples/compiler_inputs}"
 # 支持指定单个文件进行测试
 SINGLE_FILE="${2:-}"
-ASM_DIR="test/asm"
+ASM_DIR="examples/asm"
 
 # 检查源目录是否存在
 if [[ ! -d "$SRC_DIR" ]]; then
@@ -143,7 +143,7 @@ else
 fi
 
 # 创建临时目录用于编译
-TEMP_DIR="test/verify_temp"
+TEMP_DIR="examples/verify_temp"
 mkdir -p "$TEMP_DIR"
 
 # 编译启动文件

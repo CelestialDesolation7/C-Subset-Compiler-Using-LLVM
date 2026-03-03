@@ -81,9 +81,7 @@ test/verify_temp
 # ========================
 *.ll
 
-# Generated assembly and IR directories
-asm/
-ir/
+
 
 # ========================
 # Logs, caches, temp
@@ -102,4 +100,6 @@ packages/
 PLCproject.sln
 HISTORY/
 .DS_Store
-/test
+examples/ast/
+examples/asm/
+examples/ir/

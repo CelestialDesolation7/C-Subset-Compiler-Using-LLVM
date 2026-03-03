@@ -41,9 +41,9 @@ if [[ -z "$TOYC" ]]; then
 fi
 
 base="$(basename "$c_file" .c)"
-DEBUG_DIR="test/debug"
-ASM_DIR="test/asm"
-IR_DIR="test/ir"
+DEBUG_DIR="examples/debug"
+ASM_DIR="examples/asm"
+IR_DIR="examples/ir"
 
 # 清理旧输出并创建目录
 rm -f "$DEBUG_DIR/${base}"_* 2>/dev/null || true

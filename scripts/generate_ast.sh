@@ -8,7 +8,7 @@ set -eu
 [[ -n "${BASH_VERSION:-}" ]] && set -o pipefail
 
 SRC_DIR="${1:-examples/compiler_inputs}"
-OUT_DIR="test/ast"
+OUT_DIR="examples/ast"
 
 # ---------- 查找 ToyC 可执行文件 ----------
 TOYC=""
