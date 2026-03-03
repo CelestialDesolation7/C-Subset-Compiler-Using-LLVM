@@ -15,11 +15,14 @@ namespace toyc {
 //   2. generateFunction      — 按函数生成汇编（prologue → 指令 → epilogue）
 //   3. 占位符替换            — 函数结束后回填实际栈帧大小
 class RISCVCodeGen {
+#pragma region 公有接口
   public:
     RISCVCodeGen();
     // 主入口：生成整个模块的 RISC-V 汇编
     std::string generate(ir::Module &module);
+#pragma endregion
 
+#pragma region 私有状态
   private:
     RegInfo regInfo_; // 目标架构寄存器信息
     std::map<std::string, std::unique_ptr<LinearScanAllocator>> funcAllocators_; // 函数名 → 分配器
@@ -45,6 +48,9 @@ class RISCVCodeGen {
         std::string lhsReg, rhsReg; // 已解析的左右操作数寄存器名
     };
     std::unordered_map<int, CmpInfo> cmpMap_; // vreg → CmpInfo
+#pragma endregion
+
+#pragma region 私有方法
 
     // -------- 预计算寄存器分配 --------
     // 对模块中每个函数执行线性扫描，结果保存到 funcAllocators_
@@ -82,6 +88,8 @@ class RISCVCodeGen {
     void calculateStackFrame(); // 计算栈帧总大小（对齐到 16 字节）
     void updateStackFramePlaceholders(); // 替换 prologue/epilogue 占位符为实际指令
 };
+
+#pragma endregion
 
 // 便捷函数：从结构化 IR 模块直接生成 RISC-V 汇编字符串
 std::string generateRISCVAssembly(ir::Module &module);

@@ -19,6 +19,8 @@ using namespace toyc::ir;
 
 static std::ostream *g_out = &std::cout;
 
+#pragma region 格式化输出辅助
+
 // ======================== 格式化输出辅助 ========================
 
 static void printSeparator(char ch = '=', int width = 60) {
@@ -31,6 +33,10 @@ static void printHeader(const std::string &title) {
     *g_out << title << "\n";
     printSeparator();
 }
+
+#pragma endregion
+
+#pragma region 调试信息输出
 
 // ======================== 调试信息输出 ========================
 
@@ -194,6 +200,10 @@ static void dumpAllocationResult(const AllocationResult &result, const RegInfo &
     }
 }
 
+#pragma endregion
+
+#pragma region IR 处理流程
+
 /// 处理一段 LLVM IR 文本：解析 → 分析 → 分配 → 输出
 static void processIR(const std::string &irText) {
     // 1. 解析 IR
@@ -229,7 +239,9 @@ static void processIR(const std::string &irText) {
     printSeparator('=', 60);
     *g_out << "分析完成\n";
 }
+#pragma endregion
 
+#pragma region 主程序
 // ======================== 主程序 ========================
 
 int main(int argc, char *argv[]) {
@@ -351,3 +363,5 @@ int main(int argc, char *argv[]) {
 
     return 0;
 }
+
+#pragma endregion

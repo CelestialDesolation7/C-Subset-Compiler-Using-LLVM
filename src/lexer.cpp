@@ -1,12 +1,15 @@
 #include "lexer.h"
 #include <unordered_map>
 
+#pragma region 关键字映射表
 // 关键字映射表：将标识符字符串映射到对应的 TokenType
 static const std::unordered_map<std::string, TokenType> keywords = {
     {"int", TokenType::INT},     {"void", TokenType::VOID},        {"if", TokenType::IF},
     {"else", TokenType::ELSE},   {"while", TokenType::WHILE},      {"return", TokenType::RETURN},
     {"break", TokenType::BREAK}, {"continue", TokenType::CONTINUE}};
+#pragma endregion
 
+#pragma region 基础扫描方法
 // 构造函数：初始化源代码和行号
 Lexer::Lexer(const std::string &source) : src(source), pos(0), line(1) {}
 
@@ -31,7 +34,9 @@ void Lexer::skipWhitespace() {
 
 // makeToken：基于最近消费的单字符生成 Token，lexeme 为该字符
 Token Lexer::makeToken(TokenType type) { return {type, std::string(1, src[pos - 1]), line}; }
+#pragma endregion
 
+#pragma region 词法单元识别
 // identifier：解析标识符或关键字，支持字母、数字和下划线
 Token Lexer::identifier() {
     size_t start = pos - 1; // 回退一位，因为 nextToken() 中已经 advance() 了一次
@@ -166,3 +171,4 @@ Token Lexer::nextToken() {
     // 其他未识别字符
     return {TokenType::UNKNOWN, std::string(1, c), line};
 }
+#pragma endregion

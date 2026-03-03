@@ -4,12 +4,11 @@
 #include <sstream>
 #include <stdexcept>
 
-
 namespace toyc {
 
 using namespace ir;
 
-// ======================== 辅助函数 ========================
+#pragma region 辅助函数
 
 // trim：去除字符串前后的空白字符
 static std::string trim(const std::string &s) {
@@ -25,7 +24,9 @@ static bool startsWith(const std::string &s, const std::string &prefix) {
     return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;
 }
 
-// ======================== parseModule ========================
+#pragma endregion
+
+#pragma region 模块解析
 
 // parseModule：解析完整的 LLVM IR 文本为 Module
 // 遍历每一行，匹配 "define" 开头的函数定义，收集函数体直到 "}"
@@ -67,7 +68,9 @@ std::unique_ptr<Module> IRParser::parseModule(const std::string &irText) {
     return mod;
 }
 
-// ======================== parseFunction ========================
+#pragma endregion
+
+#pragma region 函数解析
 
 // parseFunction：解析指定名称的函数，若 funcName 为空则返回第一个函数
 std::unique_ptr<Function> IRParser::parseFunction(const std::string &irText,
@@ -84,7 +87,9 @@ std::unique_ptr<Function> IRParser::parseFunction(const std::string &irText,
     return nullptr;
 }
 
-// ======================== 内部辅助：从定义行和函数体构建 Function ========================
+#pragma endregion
+
+#pragma region 内部辅助：从定义行和函数体构建 Function
 
 // parseFunctionFromDefAndBody：从函数定义行和函数体文本构建 Function 对象
 // 1. 用正则解析函数名、返回类型、参数列表
@@ -167,7 +172,9 @@ std::unique_ptr<Function> IRParser::parseFunctionFromDefAndBody(const std::strin
     return func;
 }
 
-// ======================== parseParameters ========================
+#pragma endregion
+
+#pragma region 参数解析
 
 // parseParameters：从函数定义行提取参数虚拟寄存器 ID
 // 匹配括号内的 %数字 模式
@@ -190,7 +197,9 @@ std::vector<int> IRParser::parseParameters(const std::string &defLine) {
     return paramVregs;
 }
 
-// ======================== parseInstruction ========================
+#pragma endregion
+
+#pragma region 指令解析
 
 // parseInstruction：解析单行 LLVM IR 指令为结构化 Instruction
 // 按优先级尝试匹配：ret → br → store → %def = ... （alloca/load/call/icmp/算术）
@@ -317,7 +326,9 @@ Instruction IRParser::parseInstruction(const std::string &line) {
     return Instruction::makeRetVoid();
 }
 
-// ======================== parseOperand ========================
+#pragma endregion
+
+#pragma region 操作数解析
 
 // parseOperand：解析操作数字符串
 // "%N" → VReg，"%name" → Label，数字 → Imm，"true"/"false" → BoolLit
@@ -349,5 +360,7 @@ Operand IRParser::parseOperand(const std::string &text) {
 
     return Operand::none();
 }
+
+#pragma endregion
 
 } // namespace toyc

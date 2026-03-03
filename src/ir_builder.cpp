@@ -1,7 +1,6 @@
 #include "ir_builder.h"
 #include <algorithm>
 
-
 namespace toyc {
 
 using namespace ir;
@@ -9,7 +8,7 @@ using namespace ir;
 // 构造函数：初始化并进入第一层作用域
 IRBuilder::IRBuilder() { enterScope(); }
 
-// ======================== 辅助方法 ========================
+#pragma region 辅助方法
 
 // newVReg：分配并返回一个新的虚拟寄存器操作数
 Operand IRBuilder::newVReg() { return Operand::vreg(++vregCounter_); }
@@ -40,7 +39,9 @@ void IRBuilder::emit(Instruction inst) {
     currentBB_->insts.push_back(std::move(p));
 }
 
-// ======================== 作用域管理 ========================
+#pragma endregion
+
+#pragma region 作用域管理
 
 // enterScope：进入新作用域（压入新的变量映射表）
 void IRBuilder::enterScope() { scopeStack_.emplace_back(); }
@@ -67,7 +68,9 @@ Operand IRBuilder::findVariable(const std::string &name) {
     return Operand::none();
 }
 
-// ======================== 模块/函数 ========================
+#pragma endregion
+
+#pragma region 模块与函数构建
 
 // buildModule：生成完整的 IR 模块，遍历所有函数定义并逐个生成
 std::unique_ptr<Module> IRBuilder::buildModule(const std::vector<std::shared_ptr<FuncDef>> &funcs) {
@@ -153,7 +156,9 @@ void IRBuilder::buildFunction(const std::shared_ptr<FuncDef> &funcDef) {
     module_->functions.push_back(std::move(func));
 }
 
-// ======================== 语句 ========================
+#pragma endregion
+
+#pragma region 语句生成
 
 // buildBlock：生成语句块 IR，进入新作用域后遍历所有语句
 void IRBuilder::buildBlock(const std::shared_ptr<BlockStmt> &block) {
@@ -297,7 +302,9 @@ void IRBuilder::buildWhile(const std::shared_ptr<WhileStmt> &whileStmt) {
     breakLabels_.pop_back();
     continueLabels_.pop_back();
 }
+#pragma endregion
 
+#pragma region 语句生成
 // buildReturn：生成返回语句 IR，根据是否有返回值选择 ret/retvoid
 void IRBuilder::buildReturn(const std::shared_ptr<ReturnStmt> &retStmt) {
     if (retStmt->expr) {
@@ -321,7 +328,9 @@ void IRBuilder::buildContinue() {
         emit(Instruction::makeBr(Operand::label(continueLabels_.back())));
 }
 
-// ======================== 表达式 ========================
+#pragma endregion
+
+#pragma region 表达式生成
 
 // buildExpr：生成表达式 IR，返回结果操作数
 // 根据表达式类型 dispatch：数字返回立即数，标识符先查缓存再 load，二元/一元/调用递归处理
@@ -510,7 +519,9 @@ Operand IRBuilder::buildCall(const std::shared_ptr<CallExpr> &call) {
     return result;
 }
 
-// ======================== 便捷函数 ========================
+#pragma endregion
+
+#pragma region 便捷函数
 
 // generateLLVMIR：一步完成 AST → IR 生成，返回 LLVM IR 文本
 std::string generateLLVMIR(const std::vector<std::shared_ptr<FuncDef>> &funcs) {
@@ -518,5 +529,7 @@ std::string generateLLVMIR(const std::vector<std::shared_ptr<FuncDef>> &funcs) {
     auto mod = builder.buildModule(funcs);
     return mod->toString();
 }
+
+#pragma endregion
 
 } // namespace toyc

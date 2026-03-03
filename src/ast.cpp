@@ -1,12 +1,15 @@
 #include "ast.h"
 
+#pragma region 辅助函数
 // 缩进打印辅助函数：根据 level 层级打印相应数量的缩进空格（每层两个空格），
 // 在打印 AST 节点时用于控制层次结构显示
 static void printIndent(int level, std::ostream &os) {
     for (int i = 0; i < level; ++i)
         os << "  ";
 }
+#pragma endregion
 
+#pragma region 表达式节点打印
 // NumberExpr 打印实现：输出 Number(value)，value 为数字字面量
 void NumberExpr::print(int level, std::ostream &os) const {
     printIndent(level, os);
@@ -43,7 +46,9 @@ void CallExpr::print(int level, std::ostream &os) const {
     for (auto &arg : args)
         arg->print(level + 1, os);
 }
+#pragma endregion
 
+#pragma region 语句节点打印
 // AssignStmt 打印实现：输出 Assign(name)，name 为被赋值变量名，然后打印赋值表达式
 void AssignStmt::print(int level, std::ostream &os) const {
     printIndent(level, os);
@@ -107,9 +112,12 @@ void BlockStmt::print(int level, std::ostream &os) const {
     printIndent(level, os);
     os << "Block\n";
     for (auto &s : stmts)
-        if (s) s->print(level + 1, os);
+        if (s)
+            s->print(level + 1, os);
 }
+#pragma endregion
 
+#pragma region 函数定义节点打印
 // FuncDef 打印实现：
 // 1. 输出 Function retType name(params)
 // 2. 打印函数体 BlockStmt
@@ -124,3 +132,4 @@ void FuncDef::print(int level, std::ostream &os) const {
     os << ")\n";
     body->print(level + 1, os);
 }
+#pragma endregion

@@ -3,11 +3,10 @@
 #include <sstream>
 #include <stdexcept>
 
-
 namespace toyc {
 namespace ir {
 
-// ======================== Opcode 工具函数 ========================
+#pragma region Opcode 工具函数
 
 // opcodeToString：将 Opcode 枚举值转换为对应 LLVM IR 关键字
 std::string opcodeToString(Opcode op) {
@@ -59,6 +58,10 @@ Opcode stringToArithOpcode(const std::string &s) {
     throw std::runtime_error("Unknown arithmetic opcode: " + s);
 }
 
+#pragma endregion
+
+#pragma region 比较谓词 CmpPred
+
 // cmpPredToString：将比较谓词转换为 LLVM IR 文本
 std::string cmpPredToString(CmpPred pred) {
     switch (pred) {
@@ -95,7 +98,9 @@ CmpPred stringToCmpPred(const std::string &s) {
     return CmpPred::EQ; // 默认返回 EQ
 }
 
-// ======================== Operand ========================
+#pragma endregion
+
+#pragma region 操作数 Operand
 
 // toString：将操作数序列化为 LLVM IR 文本
 // VReg → "%N"，Imm → "N"，Label → "%name"，BoolLit → "true"/"false"
@@ -115,7 +120,9 @@ std::string Operand::toString() const {
     return "";
 }
 
-// ======================== Instruction 工厂方法 ========================
+#pragma endregion
+
+#pragma region 指令工厂方法
 
 // makeAlloca：创建栈分配指令 %def = alloca type, align N
 Instruction Instruction::makeAlloca(Operand def, const std::string &type, int align) {
@@ -217,7 +224,9 @@ Instruction Instruction::makeCall(Operand def, const std::string &retType,
     return i;
 }
 
-// ======================== Instruction 查询方法 ========================
+#pragma endregion
+
+#pragma region 指令查询方法
 
 // defReg：返回指令定义（写入）的虚拟寄存器 ID，若无定义返回 -1
 int Instruction::defReg() const { return def.isVReg() ? def.regId() : -1; }
@@ -373,7 +382,9 @@ std::string Instruction::toString() const {
     return s;
 }
 
-// ======================== BasicBlock ========================
+#pragma endregion
+
+#pragma region 基本块 BasicBlock
 
 // firstPos：返回块内第一条指令的定义位置（用于活跃区间计算）
 int BasicBlock::firstPos() const { return insts.empty() ? -1 : insts.front()->posDef(); }
@@ -381,7 +392,9 @@ int BasicBlock::firstPos() const { return insts.empty() ? -1 : insts.front()->po
 // lastPos：返回块内最后一条指令的使用位置
 int BasicBlock::lastPos() const { return insts.empty() ? -1 : insts.back()->posUse(); }
 
-// ======================== Function ========================
+#pragma endregion
+
+#pragma region 函数 Function
 
 // entryBlock：返回函数入口基本块（即第一个基本块）
 BasicBlock *Function::entryBlock() const { return blocks.empty() ? nullptr : blocks[0].get(); }
@@ -442,7 +455,9 @@ std::string Function::toString() const {
     return s;
 }
 
-// ======================== Module ========================
+#pragma endregion
+
+#pragma region 模块 Module
 
 // toString：将模块序列化为完整的 LLVM IR 文本（含模块头、所有函数）
 std::string Module::toString() const {
@@ -455,6 +470,8 @@ std::string Module::toString() const {
     }
     return s;
 }
+
+#pragma endregion
 
 } // namespace ir
 } // namespace toyc

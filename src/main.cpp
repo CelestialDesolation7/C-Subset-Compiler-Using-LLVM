@@ -15,6 +15,7 @@
 #include <sstream>
 #include <string>
 
+#pragma region 辅助函数
 // readFile：读取文件全部内容为字符串
 static std::string readFile(const std::string &path) {
     std::ifstream ifs(path);
@@ -35,7 +36,9 @@ static void printUsage(const char *prog) {
               << "  --all         Print AST + IR + ASM\n"
               << "  -o <file>     Write assembly to file\n";
 }
+#pragma endregion
 
+#pragma region 主程序
 int main(int argc, char *argv[]) {
     if (argc < 2) {
         printUsage(argv[0]);
@@ -128,3 +131,4 @@ int main(int argc, char *argv[]) {
 
     return 0;
 }
+#pragma endregion

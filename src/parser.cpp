@@ -1,5 +1,6 @@
 #include "parser.h"
 
+#pragma region 初始化与工具方法
 // 构造函数：初始化词法分析器并预读两个 Token 到 cur 和 nxt
 Parser::Parser(const std::string &source) : lex(source) {
     cur = lex.nextToken(); // 读取第一个 Token
@@ -37,7 +38,9 @@ std::vector<std::shared_ptr<FuncDef>> Parser::parseCompUnit() {
         funcs.push_back(parseFuncDef());
     return funcs;
 }
+#pragma endregion
 
+#pragma region 函数定义解析
 // parseFuncDef：解析函数定义 FuncDef → ("int" ∣ "void") ID "(" Params? ")" Block
 std::shared_ptr<FuncDef> Parser::parseFuncDef() {
     std::string retType = cur.lexeme; // 保存返回类型
@@ -118,7 +121,9 @@ std::shared_ptr<BlockStmt> Parser::parseBlock() {
     }
     return block;
 }
+#pragma endregion
 
+#pragma region 语句解析
 // parseStmt：解析单条语句，支持多种语句形式
 ASTPtr Parser::parseStmt() {
     // 块语句
@@ -231,7 +236,9 @@ ASTPtr Parser::parseStmt() {
         return e;
     }
 }
+#pragma endregion
 
+#pragma region 表达式解析
 // parseExpr：入口，解析逻辑或表达式
 ASTPtr Parser::parseExpr() { return parseLOr(); }
 
@@ -340,3 +347,4 @@ ASTPtr Parser::parsePrimary() {
     std::cerr << "Unexpected primary: " << cur.lexeme << " at line " << cur.line << "\n";
     exit(1);
 }
+#pragma endregion

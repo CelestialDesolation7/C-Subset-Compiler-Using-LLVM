@@ -19,6 +19,8 @@
 
 namespace fs = std::filesystem;
 
+#pragma region 辅助函数
+
 // readFile：读取文件全部内容
 static std::string readFile(const std::string &path) {
     std::ifstream ifs(path);
@@ -28,6 +30,10 @@ static std::string readFile(const std::string &path) {
     }
     return std::string((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
 }
+
+#pragma endregion
+
+#pragma region 单文件测试
 
 /**
  * @brief 测试单个 .c 文件的完整编译流水线
@@ -100,6 +106,10 @@ static bool testFile(const std::string &path, bool verbose) {
     }
 }
 
+#pragma endregion
+
+#pragma region 主程序
+
 int main(int argc, char *argv[]) {
     // 解析命令行参数
     bool verbose = false;
@@ -140,3 +150,5 @@ int main(int argc, char *argv[]) {
     std::cout << "\n=== Results: " << passed << "/" << total << " passed ===\n";
     return (passed == total) ? 0 : 1;
 }
+
+#pragma endregion

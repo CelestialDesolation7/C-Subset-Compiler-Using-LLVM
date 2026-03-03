@@ -9,21 +9,24 @@ namespace toyc {
 // IRBuilder 类：将 AST 转换为结构化 LLVM IR（ir::Module）
 // 采用递归下降方式遍历 AST，生成对应的 IR 指令
 class IRBuilder {
+#pragma region 公有接口
   public:
     // 构造函数
     IRBuilder();
 
     // 生成完整的模块 IR（包含所有函数）
     std::unique_ptr<ir::Module> buildModule(const std::vector<std::shared_ptr<FuncDef>> &funcs);
+#pragma endregion
 
+#pragma region 私有状态
   private:
-    int vregCounter_ = 0;          // 虚拟寄存器计数器
-    int labelCounter_ = 0;         // 标签计数器
-    std::string currentFuncName_;  // 当前处理的函数名
-    bool isMainFunction_ = false;  // 标记是否为 main 函数
-    bool hasReturn_ = false;       // 标记函数是否已有返回语句
+    int vregCounter_ = 0;         // 虚拟寄存器计数器
+    int labelCounter_ = 0;        // 标签计数器
+    std::string currentFuncName_; // 当前处理的函数名
+    bool isMainFunction_ = false; // 标记是否为 main 函数
+    bool hasReturn_ = false;      // 标记函数是否已有返回语句
 
-    ir::Module *module_ = nullptr;       // 当前模块指针
+    ir::Module *module_ = nullptr;        // 当前模块指针
     ir::Function *currentFunc_ = nullptr; // 当前函数指针
     ir::BasicBlock *currentBB_ = nullptr; // 当前基本块（指令插入点）
 
@@ -34,6 +37,9 @@ class IRBuilder {
 
     std::vector<std::string> breakLabels_;    // break 跳转目标标签栈
     std::vector<std::string> continueLabels_; // continue 跳转目标标签栈
+#pragma endregion
+
+#pragma region 私有辅助方法
 
     // -------- 辅助方法 --------
 
@@ -47,11 +53,14 @@ class IRBuilder {
     void setInsertBlock(ir::BasicBlock *bb);
     // 发射一条指令到当前基本块
     void emit(ir::Instruction inst);
+#pragma endregion
+
+#pragma region 私有生成方法
 
     // -------- 作用域管理 --------
 
-    void enterScope();  // 进入新作用域
-    void exitScope();   // 退出当前作用域
+    void enterScope(); // 进入新作用域
+    void exitScope();  // 退出当前作用域
     // 在当前作用域添加变量（变量名 → alloca 寄存器）
     void addVariable(const std::string &name, const ir::Operand &allocaReg);
     // 从当前作用域开始向外查找变量
@@ -93,6 +102,7 @@ class IRBuilder {
     ir::Operand buildLogicalOp(const std::string &op, const ASTPtr &lhs, const ASTPtr &rhs);
     // 生成函数调用 IR
     ir::Operand buildCall(const std::shared_ptr<CallExpr> &call);
+#pragma endregion
 };
 
 // 便捷函数：从 AST 生成 LLVM IR 文本

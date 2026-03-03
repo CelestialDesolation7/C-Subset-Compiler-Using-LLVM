@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 
+#pragma region TokenType 枚举
 // TokenType 枚举：表示词法分析器输出的各种符号类型
 enum class TokenType {
     // 字面量与标识符
@@ -52,10 +53,13 @@ enum class TokenType {
     END,    // 文件结束标记
     UNKNOWN // 未知或非法 Token
 };
+#pragma endregion
 
+#pragma region Token 结构体
 // Token 结构体：表示词法单元
 struct Token {
     TokenType type;     // Token 类型
     std::string lexeme; // 原始文本内容
     int line;           // 所在行号，用于错误定位
 };
+#pragma endregion

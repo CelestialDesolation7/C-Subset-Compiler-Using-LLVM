@@ -13,7 +13,7 @@
 
 namespace toyc {
 
-// ======================== 活跃区间 ========================
+#pragma region 活跃区间
 
 // LiveRange：一段连续的活跃范围 [start, end]
 struct LiveRange {
@@ -50,7 +50,9 @@ class LiveInterval {
     bool operator<(const LiveInterval &o) const { return start() < o.start(); }
 };
 
-// ======================== 物理寄存器 ========================
+#pragma endregion
+
+#pragma region 物理寄存器
 
 // PhysReg：物理寄存器描述
 struct PhysReg {
@@ -90,7 +92,9 @@ class RegInfo {
     std::string getRegName(int id) const; // 获取寄存器名称
 };
 
-// ======================== 活跃性分析 ========================
+#pragma endregion
+
+#pragma region 活跃性分析
 
 // LivenessAnalysis：基于数据流方程的活跃性分析
 // 计算每个基本块的 useSet/defSet/liveIn/liveOut
@@ -131,7 +135,9 @@ class LiveIntervalBuilder {
     void buildSimplifiedIntervalForVreg(int vreg, std::unique_ptr<LiveInterval> &interval);
 };
 
-// ======================== 分配结果 ========================
+#pragma endregion
+
+#pragma region 分配结果
 
 // AllocationResult：寄存器分配的最终输出
 class AllocationResult {
@@ -143,7 +149,9 @@ class AllocationResult {
     std::set<int> calleeSavedRegs; // 使用过的被调用者保存寄存器（需在函数入口/出口保护）
 };
 
-// ======================== 线性扫描分配器 ========================
+#pragma endregion
+
+#pragma region 线性扫描分配器
 
 // LinearScanAllocator：基于活跃区间的线性扫描寄存器分配器
 // 核心流程：
@@ -232,5 +240,7 @@ class LinearScanAllocator {
     // 按结束位置有序插入到 active_ 列表
     void insertActiveInterval(LiveInterval *interval);
 };
+
+#pragma endregion
 
 } // namespace toyc
