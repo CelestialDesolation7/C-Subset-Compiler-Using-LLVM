@@ -46,6 +46,8 @@ class LiveInterval {
     // 返回最晚的活跃结束位置
     int end() const;
     bool empty() const { return ranges.empty(); }
+    // 检查指定位置是否处于活跃区间的空洞中（在 start~end 范围内但不被任何 range 覆盖）
+    bool inHole(int pos) const;
 
     bool operator<(const LiveInterval &o) const { return start() < o.start(); }
 };
@@ -118,21 +120,17 @@ class LiveIntervalBuilder {
     /**
      * @param F         目标函数 IR
      * @param LA        已完成的活跃性分析
-     * @param splitting 是否使用简化区间模式
      */
-    LiveIntervalBuilder(ir::Function &F, const LivenessAnalysis &LA, bool splitting = false);
+    LiveIntervalBuilder(ir::Function &F, const LivenessAnalysis &LA);
     // 构建所有虚拟寄存器的活跃区间映射
     std::unordered_map<int, std::unique_ptr<LiveInterval>> build();
 
   private:
     ir::Function &F_;
     const LivenessAnalysis &LA_;
-    bool splitting_;
 
     // 为单个 vreg 构建精确的活跃区间（考虑跨基本块的活跃传播）
     void buildIntervalForVreg(int vreg, std::unique_ptr<LiveInterval> &interval);
-    // 为单个 vreg 构建简化区间（仅在 def/use 点各加一个点区间）
-    void buildSimplifiedIntervalForVreg(int vreg, std::unique_ptr<LiveInterval> &interval);
 };
 
 #pragma endregion
@@ -175,6 +173,10 @@ class LinearScanAllocator {
     void setDebugOutput(std::ostream *os) { debugOutput_ = os; }
 
     const AllocationResult &getAllocationResult() const { return result_; }
+    // 获取所有虚拟寄存器的活跃区间（供代码生成器查询活跃性）
+    const std::unordered_map<int, std::unique_ptr<LiveInterval>> &getIntervals() const {
+        return intervals_;
+    }
     // 获取实际使用过的物理寄存器集合
     std::set<int> getUsedPhysRegs() const;
     // 获取使用过的被调用者保存寄存器集合
@@ -200,9 +202,13 @@ class LinearScanAllocator {
     bool spillTempCounter_ = false;             // 交替选择计数器
     std::set<int> allocatedVregs_;              // 已分配的虚拟寄存器集合
 
-    std::vector<LiveInterval *> active_; // 当前活跃的区间列表（按结束位置排序）
-    AllocationResult result_;            // 分配结果
-    int nextSpillSlot_ = 0;              // 下一个溢出槽编号
+    std::vector<LiveInterval *> active_;   // 当前活跃的区间列表（按结束位置排序）
+    std::vector<LiveInterval *> inactive_; // 当前处于空洞中的区间列表
+    AllocationResult result_;              // 分配结果
+    int nextSpillSlot_ = 0;                // 下一个溢出槽编号
+
+    // 活跃区间存储（所有权归分配器，供代码生成器查询）
+    std::unordered_map<int, std::unique_ptr<LiveInterval>> intervals_;
 
     // -------- 参数处理 --------
     // 将参数 vreg 绑定到 a0-a7 或栈位置
@@ -213,19 +219,19 @@ class LinearScanAllocator {
     void assignInstrPositions(ir::Function &F);
 
     // -------- 线性扫描核心 --------
-    // 执行线性扫描分配算法
-    AllocationResult
-    runLinearScan(const std::unordered_map<int, std::unique_ptr<LiveInterval>> &intervals);
+    // 执行线性扫描分配算法（使用 intervals_ 成员）
+    AllocationResult runLinearScan();
 
     // 过期回收：释放在 curStart 之前已经结束的活跃区间占用的物理寄存器
     void expireOldIntervals(int curStart);
+    // 处理 active↔inactive 状态转换（区间空洞感知）
+    void handleActiveInactiveTransitions(int curStart);
     // 为区间分配一个空闲的物理寄存器
     void allocatePhysicalReg(LiveInterval &interval);
-    // 溢出处理：将当前区间或 active 中结束最晚的区间溢出到栈
+    // 溢出处理：将当前区间或 active/inactive 中结束最晚的区间溢出到栈
     void spillAtInterval(LiveInterval &interval);
     // 分配一个新的栈溢出槽（每次 -4 字节）
     int allocateSpillSlot();
-
     // -------- 物理寄存器管理 --------
     // 初始化空闲寄存器池
     void initializeFreeRegs();

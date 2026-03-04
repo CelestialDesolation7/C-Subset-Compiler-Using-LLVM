@@ -4,7 +4,6 @@
 #include <set>
 #include <sstream>
 
-
 namespace toyc {
 
 using namespace ir;
@@ -82,15 +81,37 @@ void RISCVCodeGen::generateFunction(Function &func) {
     int calleeSavedCount = static_cast<int>(alloc.calleeSavedRegs.size());
     frameOverhead_ = 8 + calleeSavedCount * 4;
 
-    // 预计算函数调用时 caller-saved 保存区大小
+    // 预计算函数调用时 caller-saved 保存区大小（基于每个调用点的活跃性取最大值）
     {
-        std::set<int> csRegs;
-        for (auto &[vreg, physReg] : alloc.vregToPhys) {
-            if (regInfo_.isCallerSaved(physReg) &&
-                !funcAllocators_[currentFunction_]->isSpillTempReg(physReg))
-                csRegs.insert(physReg);
+        auto &intervals = funcAllocators_[currentFunction_]->getIntervals();
+        int maxSaveCount = 0;
+        for (auto &bb : func.blocks) {
+            for (auto &inst : bb->insts) {
+                if (inst->opcode != ir::Opcode::Call)
+                    continue;
+                int callPosUse = inst->posUse();
+                // 确定此调用的 def 物理寄存器（排除不需要保存的 def 寄存器）
+                int defPhys = -1;
+                if (inst->def.isVReg()) {
+                    auto physIt = alloc.vregToPhys.find(inst->def.regId());
+                    if (physIt != alloc.vregToPhys.end())
+                        defPhys = physIt->second;
+                }
+                std::set<int> csRegs;
+                for (auto &[vreg, physReg] : alloc.vregToPhys) {
+                    if (regInfo_.isCallerSaved(physReg) &&
+                        !funcAllocators_[currentFunction_]->isSpillTempReg(physReg) &&
+                        physReg != defPhys) {
+                        auto ivIt = intervals.find(vreg);
+                        if (ivIt != intervals.end() && ivIt->second->contains(callPosUse)) {
+                            csRegs.insert(physReg);
+                        }
+                    }
+                }
+                maxSaveCount = std::max(maxSaveCount, static_cast<int>(csRegs.size()));
+            }
         }
-        callSaveSize_ = static_cast<int>(csRegs.size()) * 4;
+        callSaveSize_ = maxSaveCount * 4;
     }
 
     // 预计算出栈参数区大小（超过 8 个参数的调用需要栈传参）
@@ -111,14 +132,14 @@ void RISCVCodeGen::generateFunction(Function &func) {
     output_ += func.name + ":\n";
 
     // Prologue 占位符
-    std::string prologuePlaceholder = "__PROLOGUE_PLACEHOLDER_" + func.name + "__";
-    output_ += prologuePlaceholder + "\n";
+    output_ += prologuePlaceholder();
+    output_ += '\n';
 
     // 遍历所有基本块
     for (size_t bi = 0; bi < func.blocks.size(); ++bi) {
         auto &bb = func.blocks[bi];
         if (bi > 0) {
-            output_ += "." + func.name + "_" + bb->name + ":\n";
+            output_ += makeLabel(bb->name) + ":\n";
         }
         for (auto &inst : bb->insts)
             generateInst(*inst);
@@ -132,7 +153,22 @@ void RISCVCodeGen::generateFunction(Function &func) {
 }
 
 // emit：输出一条带 4 空格缩进的汇编指令
-void RISCVCodeGen::emit(const std::string &line) { output_ += "    " + line + "\n"; }
+void RISCVCodeGen::emit(const std::string &line) {
+    output_ += "    ";
+    output_ += line;
+    output_ += '\n';
+}
+
+// 占位符/标签辅助函数（集中管理格式，消除重复拼接）
+std::string RISCVCodeGen::prologuePlaceholder() const {
+    return "__PROLOGUE_PLACEHOLDER_" + currentFunction_ + "__";
+}
+std::string RISCVCodeGen::epiloguePlaceholder() const {
+    return "__EPILOGUE_PLACEHOLDER_" + currentFunction_ + "__";
+}
+std::string RISCVCodeGen::makeLabel(const std::string &name) const {
+    return "." + currentFunction_ + "_" + name;
+}
 
 #pragma endregion
 
@@ -280,10 +316,118 @@ void RISCVCodeGen::genBinOp(const Instruction &inst) {
 
 /**
  * @brief 比较指令生成
- * @details 生成兆底指令（slt/sub+seqz 等），同时将比较信息缓存到 cmpMap_，
- *          供后续 genCondBr 进行 branch fusion
+ * @details 生成兜底指令（slt/sub+seqz 等），同时将比较信息缓存到 cmpMap_，
+ *          供后续 genCondBr 进行 branch fusion。
+ *
+ * 立即数优化：
+ *   - 与 0 比较：使用 seqz/snez/slti/slt+zero 避免 li 临时寄存器
+ *   - SLT/SGE + 12 位立即数：使用 slti 避免 li 临时寄存器
+ *   - SLE/SGT + 12 位立即数：改写为 slti (imm+1) 避免 li 临时寄存器
  */
 void RISCVCodeGen::genICmp(const Instruction &inst) {
+    auto inSltiRange = [](int v) { return v >= -2048 && v <= 2047; };
+
+    // ---- 优化路径 1：与立即数 0 比较 ----
+    // 可利用 zero 寄存器 (x0)，省去 li 指令和临时寄存器
+    bool lhsIsZero = inst.ops[0].isImm() && inst.ops[0].immValue() == 0;
+    bool rhsIsZero = inst.ops[1].isImm() && inst.ops[1].immValue() == 0;
+
+    if (lhsIsZero || rhsIsZero) {
+        // 解析非零一侧的操作数
+        const Operand &nonZeroOp = rhsIsZero ? inst.ops[0] : inst.ops[1];
+        std::string reg = resolveUse(nonZeroOp);
+        std::string defReg = resolveDef(inst.def);
+
+        // 若 0 在左侧 (icmp pred 0, x)，交换为等价的 (icmp swappedPred x, 0)
+        CmpPred effPred = inst.cmpPred;
+        if (lhsIsZero && !rhsIsZero) {
+            switch (inst.cmpPred) {
+            case CmpPred::EQ:
+                effPred = CmpPred::EQ;
+                break;
+            case CmpPred::NE:
+                effPred = CmpPred::NE;
+                break;
+            case CmpPred::SLT:
+                effPred = CmpPred::SGT;
+                break; // 0 < x → x > 0
+            case CmpPred::SGT:
+                effPred = CmpPred::SLT;
+                break; // 0 > x → x < 0
+            case CmpPred::SLE:
+                effPred = CmpPred::SGE;
+                break; // 0 <= x → x >= 0
+            case CmpPred::SGE:
+                effPred = CmpPred::SLE;
+                break; // 0 >= x → x <= 0
+            }
+        }
+
+        // branch fusion 缓存：使用 zero 寄存器名，genCondBr 可生成 beq/bne/blt/... reg, zero
+        cmpMap_[inst.defReg()] = CmpInfo{effPred, reg, kRegZero};
+
+        // 兜底指令
+        switch (effPred) {
+        case CmpPred::EQ:
+            emit("seqz " + defReg + ", " + reg);
+            break;
+        case CmpPred::NE:
+            emit("snez " + defReg + ", " + reg);
+            break;
+        case CmpPred::SLT:
+            emit("slti " + defReg + ", " + reg + ", 0");
+            break;
+        case CmpPred::SGT:
+            emit("slt " + defReg + ", zero, " + reg);
+            break;
+        case CmpPred::SLE:
+            emit("slt " + defReg + ", zero, " + reg);
+            emit("xori " + defReg + ", " + defReg + ", 1");
+            break;
+        case CmpPred::SGE:
+            emit("slti " + defReg + ", " + reg + ", 0");
+            emit("xori " + defReg + ", " + defReg + ", 1");
+            break;
+        }
+        spillDefIfNeeded(inst);
+        return;
+    }
+
+    // ---- 优化路径 2：SLT/SGE + RHS 为 12 位有符号立即数 → slti ----
+    if ((inst.cmpPred == CmpPred::SLT || inst.cmpPred == CmpPred::SGE) && inst.ops[1].isImm() &&
+        inSltiRange(inst.ops[1].immValue())) {
+        std::string lhsReg = resolveUse(inst.ops[0]);
+        std::string defReg = resolveDef(inst.def);
+        std::string immStr = std::to_string(inst.ops[1].immValue());
+        // 不缓存到 cmpMap_（分支指令不支持立即数操作数），condBr 使用 bnez 回退
+        if (inst.cmpPred == CmpPred::SLT) {
+            emit("slti " + defReg + ", " + lhsReg + ", " + immStr);
+        } else { // SGE = NOT(SLT)
+            emit("slti " + defReg + ", " + lhsReg + ", " + immStr);
+            emit("xori " + defReg + ", " + defReg + ", 1");
+        }
+        spillDefIfNeeded(inst);
+        return;
+    }
+
+    // ---- 优化路径 3：SLE/SGT + RHS 为立即数且 imm+1 在 slti 范围 ----
+    // 整数恒等式：x <= N ↔ x < N+1，x > N ↔ NOT(x < N+1)
+    if ((inst.cmpPred == CmpPred::SLE || inst.cmpPred == CmpPred::SGT) && inst.ops[1].isImm() &&
+        inSltiRange(inst.ops[1].immValue() + 1)) {
+        std::string lhsReg = resolveUse(inst.ops[0]);
+        std::string defReg = resolveDef(inst.def);
+        std::string immStr = std::to_string(inst.ops[1].immValue() + 1);
+        if (inst.cmpPred == CmpPred::SLE) {
+            emit("slti " + defReg + ", " + lhsReg + ", " + immStr);
+        } else { // SGT = NOT(SLE) = NOT(SLT(imm+1))
+            emit("slti " + defReg + ", " + lhsReg + ", " + immStr);
+            emit("xori " + defReg + ", " + defReg + ", 1");
+        }
+        spillDefIfNeeded(inst);
+        return;
+    }
+
+    // ---- 默认路径：两个操作数均解析为寄存器 ----
     std::string lhsReg = resolveUse(inst.ops[0]);
     std::string rhsReg = resolveUse(inst.ops[1]);
     std::string defReg = resolveDef(inst.def);
@@ -291,7 +435,7 @@ void RISCVCodeGen::genICmp(const Instruction &inst) {
     // 缓存比较信息供 branch fusion
     cmpMap_[inst.defReg()] = CmpInfo{inst.cmpPred, lhsReg, rhsReg};
 
-    // 同时生成兜底指令（供值使用场景）
+    // 兜底指令（供值使用场景）
     switch (inst.cmpPred) {
     case CmpPred::EQ:
         emit("sub " + defReg + ", " + lhsReg + ", " + rhsReg);
@@ -326,8 +470,8 @@ void RISCVCodeGen::genICmp(const Instruction &inst) {
  */
 void RISCVCodeGen::genCondBr(const Instruction &inst) {
     // ops[0] = cond, ops[1] = true label, ops[2] = false label
-    std::string trueLabel = "." + currentFunction_ + "_" + inst.ops[1].labelName();
-    std::string falseLabel = "." + currentFunction_ + "_" + inst.ops[2].labelName();
+    std::string trueLabel = makeLabel(inst.ops[1].labelName());
+    std::string falseLabel = makeLabel(inst.ops[2].labelName());
 
     int condVreg = inst.ops[0].isVReg() ? inst.ops[0].regId() : -1;
     auto cmpIt = cmpMap_.find(condVreg);
@@ -368,7 +512,7 @@ void RISCVCodeGen::genCondBr(const Instruction &inst) {
 
 // genBr：无条件跳转 → j
 void RISCVCodeGen::genBr(const Instruction &inst) {
-    std::string target = "." + currentFunction_ + "_" + inst.ops[0].labelName();
+    std::string target = makeLabel(inst.ops[0].labelName());
     emit("j " + target);
 }
 
@@ -378,20 +522,20 @@ void RISCVCodeGen::genRet(const Instruction &inst) {
 
     if (inst.opcode == Opcode::Ret && !inst.ops.empty()) {
         std::string valReg = resolveUse(inst.ops[0]);
-        if (valReg != "a0")
+        if (valReg != kRegA0)
             emit("mv a0, " + valReg);
     }
 
     // Epilogue 占位符
-    std::string epiloguePlaceholder = "__EPILOGUE_PLACEHOLDER_" + currentFunction_ + "__";
-    output_ += epiloguePlaceholder + "\n";
+    output_ += epiloguePlaceholder();
+    output_ += '\n';
     emit("ret");
 }
 
 /**
  * @brief 函数调用指令生成
  * @details 流程：
- *   1. 保存调用者保存寄存器到栈
+ *   1. 仅保存在调用点活跃的调用者保存寄存器到栈
  *   2. 移动参数到 a0-a7
  *   3. 发出 call 指令
  *   4. 恢复调用者保存寄存器
@@ -399,6 +543,8 @@ void RISCVCodeGen::genRet(const Instruction &inst) {
  */
 void RISCVCodeGen::genCall(const Instruction &inst) {
     auto &alloc = funcAllocators_[currentFunction_]->getAllocationResult();
+    auto &intervals = funcAllocators_[currentFunction_]->getIntervals();
+    int callPosUse = inst.posUse();
 
     // 确定 def 对应的物理寄存器（用于跳过保存/恢复）
     int defPhysReg = -1;
@@ -408,13 +554,17 @@ void RISCVCodeGen::genCall(const Instruction &inst) {
             defPhysReg = physIt->second;
     }
 
-    // 收集需要保存的调用者保存寄存器（排除溢出临时寄存器和 def 寄存器）
+    // 收集需要保存的调用者保存寄存器（仅保存在调用点活跃的，排除溢出临时寄存器和 def 寄存器）
     std::vector<int> savedRegs;
     for (auto &[vreg, physReg] : alloc.vregToPhys) {
         if (regInfo_.isCallerSaved(physReg) &&
             !funcAllocators_[currentFunction_]->isSpillTempReg(physReg) && physReg != defPhysReg) {
-            if (std::find(savedRegs.begin(), savedRegs.end(), physReg) == savedRegs.end())
-                savedRegs.push_back(physReg);
+            // 检查 vreg 在调用点是否活跃
+            auto ivIt = intervals.find(vreg);
+            if (ivIt != intervals.end() && ivIt->second->contains(callPosUse)) {
+                if (std::find(savedRegs.begin(), savedRegs.end(), physReg) == savedRegs.end())
+                    savedRegs.push_back(physReg);
+            }
         }
     }
     std::sort(savedRegs.begin(), savedRegs.end());
@@ -514,7 +664,7 @@ void RISCVCodeGen::genCall(const Instruction &inst) {
 
     // 结果从 a0 移到目标寄存器（在恢复 caller-saved 之前，防止 a0 被覆盖）
     std::string defReg = resolveDef(inst.def);
-    if (defReg != "a0")
+    if (defReg != kRegA0)
         emit("mv " + defReg + ", a0");
 
     // 恢复 caller-saved 寄存器
@@ -578,15 +728,15 @@ std::string RISCVCodeGen::resolveUse(const Operand &op) {
             return tmpName;
         }
 
-        return "a0";
+        return kRegA0;
     }
-    return "zero";
+    return kRegZero;
 }
 
 // resolveDef：将 def 操作数解析为目标物理寄存器名（溢出时返回临时寄存器）
 std::string RISCVCodeGen::resolveDef(const Operand &op) {
     if (!op.isVReg()) {
-        lastDefRegName_ = "a0";
+        lastDefRegName_ = kRegA0;
         return lastDefRegName_;
     }
 
@@ -689,10 +839,10 @@ void RISCVCodeGen::updateStackFramePlaceholders() {
         offset -= 4;
     }
 
-    std::string prologuePlaceholder = "__PROLOGUE_PLACEHOLDER_" + currentFunction_ + "__";
-    size_t pos = output_.find(prologuePlaceholder);
+    std::string prologueTag = prologuePlaceholder();
+    size_t pos = output_.find(prologueTag);
     if (pos != std::string::npos) {
-        output_.replace(pos, prologuePlaceholder.size() + 1, prologue);
+        output_.replace(pos, prologueTag.size() + 1, prologue);
     }
 
     // 生成 epilogue
@@ -706,12 +856,12 @@ void RISCVCodeGen::updateStackFramePlaceholders() {
     epilogue += "    lw s0, " + std::to_string(totalStackSize_ - 8) + "(sp)\n";
     epilogue += "    addi sp, sp, " + std::to_string(totalStackSize_) + "\n";
 
-    std::string epiloguePlaceholder = "__EPILOGUE_PLACEHOLDER_" + currentFunction_ + "__";
+    std::string epilogueTag = epiloguePlaceholder();
     while (true) {
-        pos = output_.find(epiloguePlaceholder);
+        pos = output_.find(epilogueTag);
         if (pos == std::string::npos)
             break;
-        output_.replace(pos, epiloguePlaceholder.size() + 1, epilogue);
+        output_.replace(pos, epilogueTag.size() + 1, epilogue);
     }
 }
 

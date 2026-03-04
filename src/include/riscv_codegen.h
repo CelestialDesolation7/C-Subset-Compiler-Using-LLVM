@@ -82,6 +82,15 @@ class RISCVCodeGen {
     // -------- 汇编输出 --------
     void emit(const std::string &line); // 输出一条缩进后的汇编指令
 
+    // -------- 字符串辅助（消除重复拼接） --------
+    std::string prologuePlaceholder() const;              // Prologue 占位符字符串
+    std::string epiloguePlaceholder() const;              // Epilogue 占位符字符串
+    std::string makeLabel(const std::string &name) const; // 基本块标签 .func_block
+
+    // 目标架构寄存器名常量（避免魔法字符串散落于比较与返回值中）
+    static constexpr const char *kRegA0 = "a0";
+    static constexpr const char *kRegZero = "zero";
+
     // -------- 栈帧管理 --------
     void emitPrologue();        // （占位，实际由 updateStackFramePlaceholders 回填）
     void emitEpilogue();        // （占位，实际由 updateStackFramePlaceholders 回填）

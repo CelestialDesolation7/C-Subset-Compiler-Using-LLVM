@@ -81,7 +81,7 @@ debug: build
 
 # ---------- 清理 ----------
 clean:
-	@rm -rf $(BUILD_DIR) build-linux examples/asm examples/ir examples/ast examples/debug examples/verify_temp
+	@rm -rf $(BUILD_DIR) build-linux examples/asm examples/ir examples/ast examples/debug examples/verify_temp 2>/dev/null; true
 
 clean-test:
 	@rm -rf examples/asm examples/ir examples/ast examples/debug examples/verify_temp

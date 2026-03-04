@@ -93,7 +93,15 @@ C 源代码 → 词法分析 → 语法分析 → AST → IRBuilder → ir::Modu
 - **溢出处理**: 自动栈分配和加载/存储生成
 - **参数处理**: 支持多参数函数调用（前 8 个通过寄存器，其余通过栈）
 
-#### 2.3.2 算法优势
+#### 2.3.2 两项关键优化
+
+在经典线性扫描算法基础上，本项目实现了两项优化，显著减少冗余指令并提升寄存器利用率：
+
+1. **Caller-saved 按需保存**：函数调用点（`genCall`）不再无条件保存所有 caller-saved 寄存器，而是通过活跃区间查询 `interval.contains(callPosUse)` 仅保存在调用点仍然活跃的寄存器。`callSaveSize_` 也改为按每个调用点分别计算活跃寄存器数量后取最大值，缩减不必要的栈帧空间。
+
+2. **Active/Inactive 转换（区间空洞感知）**：引入 `inactive` 列表和 `inHole()` 判定。当活跃区间在当前位置存在空洞（多段 `LiveRange` 之间的间隙）时，将其从 `active` 移至 `inactive` 而非释放寄存器。当区间在后续位置恢复活跃时，移回 `active`。这避免了控制流分支导致的不必要溢出。
+
+#### 2.3.3 算法优势
 - **时间复杂度**: O(n log n)，远优于图着色算法
 - **空间效率**: 高效利用寄存器，减少内存访问
 - **工业级实现**: 被广泛应用于 JVM、V8 等生产环境
@@ -421,7 +429,7 @@ ToyC 提供四层测试体系——从快速的内置单元测试到完整的端
 
 ### 6.1 内置单元测试
 
-对所有 36 个测试用例执行完整编译流水线（词法 → 语法 → AST → IR → 寄存器分配 → RISC-V 汇编），验证各阶段无异常，并同时将 AST、IR、汇编产物保存到 `test/` 目录：
+对所有 37 个测试用例执行完整编译流水线（词法 → 语法 → AST → IR → 寄存器分配 → RISC-V 汇编），验证各阶段无异常，并同时将 AST、IR、汇编产物保存到 `test/` 目录：
 
 ```bash
 make test
@@ -433,8 +441,9 @@ Testing: 01_minimal.c ... OK
 Testing: 02_assignment.c ... OK
 ...
 Testing: 36_test_while.c ... OK
+Testing: 37_test_regalloc_opts.c ... OK
 
-=== Results: 36/36 passed ===
+=== Results: 37/37 passed ===
 ```
 
 ### 6.2 批量生成汇编 / IR / AST
@@ -521,7 +530,7 @@ make rebuild     # 清理后重新编译
 
 ## 7 测试用例说明
 
-项目包含 **36 个测试用例**，覆盖从基础语法到复杂控制流的各种场景：
+项目包含 **37 个测试用例**，覆盖从基础语法到复杂控制流的各种场景：
 
 ### 7.1 基础语法（01–15）
 
@@ -573,6 +582,12 @@ make rebuild     # 清理后重新编译
 | `34_test_unary.c`              | 一元运算符 `-` 和 `!`     |
 | `35_test_void.c`               | void 函数                  |
 | `36_test_while.c`              | while + break 循环控制     |
+
+### 7.4 寄存器分配优化验证（37）
+
+| 文件                             | 测试功能                                     | 预期退出码 |
+| -------------------------------- | -------------------------------------------- | ---------- |
+| `37_test_regalloc_opts.c`        | caller-saved 按需保存 + active/inactive 转换 | 228        |
 
 ---
 
@@ -669,10 +684,11 @@ C-SubsetCompilerUsingLLVM/
 │   └── test_instr.sh               #   指令测试命令参考
 │
 ├── examples/                       # 测试用例
-│   └── compiler_inputs/            #   36 个 .c 测试文件
+│   └── compiler_inputs/            #   37 个 .c 测试文件
 │       ├── 01_minimal.c            #   最小程序
 │       ├── ...                     #   ...
-│       └── 36_test_while.c         #   while 循环
+│       ├── 36_test_while.c         #   while 循环
+│       └── 37_test_regalloc_opts.c #   寄存器分配优化验证
 │
 ├── docs/                           # 技术文档（7 篇）
 │   ├── 编译流程详解.md

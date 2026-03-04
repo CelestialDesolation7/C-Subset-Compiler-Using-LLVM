@@ -4,7 +4,6 @@
 #include <stack>
 #include <unordered_set>
 
-
 namespace toyc {
 
 #pragma region 物理寄存器比较器
@@ -135,6 +134,15 @@ int LiveInterval::start() const { return ranges.empty() ? INT_MAX : ranges.front
 // 返回最晚活跃结束位置（空区间返回 -1）
 int LiveInterval::end() const { return ranges.empty() ? -1 : ranges.back().end; }
 
+/**
+ * @brief 检查指定位置是否处于活跃区间的空洞中
+ * @param pos 查询位置
+ * @return true 表示 pos 在 [start, end] 范围内但不被任何 LiveRange 覆盖
+ */
+bool LiveInterval::inHole(int pos) const {
+    return !empty() && pos >= start() && pos <= end() && !contains(pos);
+}
+
 #pragma endregion
 
 #pragma region 活跃性分析实现
@@ -260,11 +268,9 @@ void LivenessAnalysis::computeLivenessIteratively(ir::Function &F) {
  * @brief 构造活跃区间构建器
  * @param F         目标函数 IR
  * @param LA        已完成的活跃性分析
- * @param splitting 是否使用简化区间模式
  */
-LiveIntervalBuilder::LiveIntervalBuilder(ir::Function &F, const LivenessAnalysis &LA,
-                                         bool splitting)
-    : F_(F), LA_(LA), splitting_(splitting) {}
+LiveIntervalBuilder::LiveIntervalBuilder(ir::Function &F, const LivenessAnalysis &LA)
+    : F_(F), LA_(LA) {}
 
 /**
  * @brief 构建所有虚拟寄存器的活跃区间
@@ -274,10 +280,7 @@ std::unordered_map<int, std::unique_ptr<LiveInterval>> LiveIntervalBuilder::buil
     std::unordered_map<int, std::unique_ptr<LiveInterval>> intervals;
     for (int vreg = 0; vreg <= F_.maxVregId; ++vreg) {
         auto interval = std::make_unique<LiveInterval>(vreg);
-        if (splitting_)
-            buildSimplifiedIntervalForVreg(vreg, interval);
-        else
-            buildIntervalForVreg(vreg, interval);
+        buildIntervalForVreg(vreg, interval);
         if (!interval->empty())
             intervals[vreg] = std::move(interval);
     }
@@ -342,28 +345,6 @@ void LiveIntervalBuilder::buildIntervalForVreg(int vreg, std::unique_ptr<LiveInt
     }
 }
 
-/**
- * @brief 为单个虚拟寄存器构建简化的活跃区间
- * @param vreg     虚拟寄存器 ID
- * @param interval 输出的活跃区间对象
- * @details 仅在每个 def/use 点处添加点区间 [pos, pos]，由 addRange 自动合并
- */
-void LiveIntervalBuilder::buildSimplifiedIntervalForVreg(int vreg,
-                                                         std::unique_ptr<LiveInterval> &interval) {
-    for (auto *bb : F_.rpoOrder) {
-        for (auto &inst : bb->insts) {
-            if (inst->defReg() == vreg)
-                interval->addRange(inst->posDef(), inst->posDef());
-            for (int u : inst->useRegs()) {
-                if (u == vreg) {
-                    interval->addRange(inst->posUse(), inst->posUse());
-                    break;
-                }
-            }
-        }
-    }
-}
-
 #pragma endregion
 
 #pragma region 线性扫描分配器实现
@@ -397,6 +378,7 @@ void LinearScanAllocator::initializeFreeRegs() {
 AllocationResult LinearScanAllocator::allocate(ir::Function &F) {
     result_ = AllocationResult{};
     active_.clear();
+    inactive_.clear();
     nextSpillSlot_ = 0;
     allocatedVregs_.clear();
     initializeFreeRegs();
@@ -413,13 +395,13 @@ AllocationResult LinearScanAllocator::allocate(ir::Function &F) {
 
     // 4. 构建活跃区间
     LiveIntervalBuilder builder(F, LA);
-    auto intervals = builder.build();
+    intervals_ = builder.build();
 
     if (debugMode_)
-        dumpIntervals(intervals);
+        dumpIntervals(intervals_);
 
     // 5. 执行线性扫描
-    result_ = runLinearScan(intervals);
+    result_ = runLinearScan();
 
     // 6. 收集使用信息
     result_.usedPhysRegs = getUsedPhysRegs();
@@ -464,24 +446,24 @@ void LinearScanAllocator::assignInstrPositions(ir::Function &F) {
 }
 
 /**
- * @brief 线性扫描分配核心算法
- * @param intervals vreg → LiveInterval 映射
+ * @brief 线性扫描分配核心算法（扩展版：支持 active/inactive 转换）
  * @return 分配结果
  * @details 按起始位置排序所有区间，依次处理：
  *   1. 过期回收已结束的活跃区间
- *   2. 已预分配（参数）的区间直接插入 active
- *   3. 有空闲寄存器则分配，否则溢出
+ *   2. 处理 active↔inactive 状态转换（区间空洞感知）
+ *   3. 已预分配（参数）的区间直接插入 active
+ *   4. 有空闲寄存器则分配，否则溢出
  */
-AllocationResult LinearScanAllocator::runLinearScan(
-    const std::unordered_map<int, std::unique_ptr<LiveInterval>> &intervals) {
+AllocationResult LinearScanAllocator::runLinearScan() {
 
     std::vector<LiveInterval *> sorted;
-    for (auto &[vreg, iv] : intervals)
+    for (auto &[vreg, iv] : intervals_)
         sorted.push_back(iv.get());
     sortIntervalsByStart(sorted);
 
     for (auto *interval : sorted) {
         expireOldIntervals(interval->start());
+        handleActiveInactiveTransitions(interval->start());
 
         if (allocatedVregs_.count(interval->vreg)) {
             // 已预分配（参数寄存器），插入 active 列表
@@ -513,7 +495,44 @@ void LinearScanAllocator::expireOldIntervals(int curStart) {
     }
 }
 
-// allocatePhysicalReg：从空闲池中取出一个寄存器并插入 active 列表
+/**
+ * @brief 处理 active↔inactive 状态转换（区间空洞感知）
+ * @param curStart 当前处理位置
+ * @details
+ *   1. 将 active 中在 curStart 处进入空洞的区间移至 inactive（不释放寄存器）
+ *   2. 将 inactive 中已完全结束的区间释放寄存器
+ *   3. 将 inactive 中在 curStart 处恢复活跃的区间移回 active
+ */
+void LinearScanAllocator::handleActiveInactiveTransitions(int curStart) {
+    // Active → Inactive: 区间在 curStart 处有空洞
+    auto it = active_.begin();
+    while (it != active_.end()) {
+        if ((*it)->inHole(curStart)) {
+            inactive_.push_back(*it);
+            it = active_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Inactive → Expired/Active
+    auto jt = inactive_.begin();
+    while (jt != inactive_.end()) {
+        if ((*jt)->end() < curStart) {
+            // 完全结束 → 释放寄存器
+            freePhysReg((*jt)->physReg);
+            jt = inactive_.erase(jt);
+        } else if ((*jt)->contains(curStart)) {
+            // 恢复活跃 → 移回 active
+            insertActiveInterval(*jt);
+            jt = inactive_.erase(jt);
+        } else {
+            ++jt;
+        }
+    }
+}
+
+// allocatePhysicalReg：从空闲池中取出优先级最高的寄存器并插入 active 列表
 void LinearScanAllocator::allocatePhysicalReg(LiveInterval &interval) {
     int physReg = allocatePhysReg();
     interval.physReg = physReg;
@@ -522,33 +541,56 @@ void LinearScanAllocator::allocatePhysicalReg(LiveInterval &interval) {
 }
 
 /**
- * @brief 溢出处理：将当前区间或 active 中结束最晚的区间溢出到栈
+ * @brief 溢出处理：将当前区间或 active/inactive 中结束最晚的区间溢出到栈
  * @param interval 当前要分配的区间
- * @details 如果 active 中有结束位置比当前区间更晚的，则溢出该区间，
+ * @details 同时考虑 active 和 inactive 列表中的区间作为踢出候选。
+ *          如果找到结束位置比当前区间更晚的，则溢出该区间，
  *          将其物理寄存器转给当前区间；否则直接溢出当前区间
  */
 void LinearScanAllocator::spillAtInterval(LiveInterval &interval) {
-    if (!active_.empty()) {
-        auto spillIt =
-            std::max_element(active_.begin(), active_.end(),
-                             [](LiveInterval *a, LiveInterval *b) { return a->end() < b->end(); });
-        LiveInterval *spill = *spillIt;
+    int bestEnd = interval.end();
+    LiveInterval *bestSpill = nullptr;
+    bool bestFromActive = true;
+    int bestIdx = -1;
 
-        if (spill->end() > interval.end()) {
-            int physReg = spill->physReg;
-
-            spill->physReg = -1;
-            spill->spillSlot = allocateSpillSlot();
-            result_.vregToPhys.erase(spill->vreg);
-            result_.vregToStack[spill->vreg] = spill->spillSlot;
-
-            active_.erase(spillIt);
-
-            interval.physReg = physReg;
-            result_.vregToPhys[interval.vreg] = physReg;
-            insertActiveInterval(&interval);
-            return;
+    // 在 active 列表中找结束最晚的
+    for (int i = 0; i < static_cast<int>(active_.size()); ++i) {
+        if (active_[i]->end() > bestEnd) {
+            bestEnd = active_[i]->end();
+            bestSpill = active_[i];
+            bestFromActive = true;
+            bestIdx = i;
         }
+    }
+
+    // 在 inactive 列表中找结束最晚的
+    for (int i = 0; i < static_cast<int>(inactive_.size()); ++i) {
+        if (inactive_[i]->end() > bestEnd) {
+            bestEnd = inactive_[i]->end();
+            bestSpill = inactive_[i];
+            bestFromActive = false;
+            bestIdx = i;
+        }
+    }
+
+    if (bestSpill != nullptr) {
+        int physReg = bestSpill->physReg;
+
+        bestSpill->physReg = -1;
+        bestSpill->spillSlot = allocateSpillSlot();
+        result_.vregToPhys.erase(bestSpill->vreg);
+        result_.vregToStack[bestSpill->vreg] = bestSpill->spillSlot;
+
+        if (bestFromActive) {
+            active_.erase(active_.begin() + bestIdx);
+        } else {
+            inactive_.erase(inactive_.begin() + bestIdx);
+        }
+
+        interval.physReg = physReg;
+        result_.vregToPhys[interval.vreg] = physReg;
+        insertActiveInterval(&interval);
+        return;
     }
     // 直接溢出当前 interval
     interval.spillSlot = allocateSpillSlot();

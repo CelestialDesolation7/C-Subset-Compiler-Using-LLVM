@@ -214,6 +214,9 @@ static void processIR(const std::string &irText) {
         return;
     }
 
+    *g_out << "===============\n";
+    *g_out << "\n=== 解析完成 ===\n";
+    *g_out << "===============\n";
     *g_out << "\n输入的 LLVM IR:\n" << irText << "\n";
 
     RegInfo regInfo;

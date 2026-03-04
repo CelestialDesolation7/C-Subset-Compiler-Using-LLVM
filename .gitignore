@@ -103,3 +103,4 @@ HISTORY/
 examples/ast/
 examples/asm/
 examples/ir/
+examples/verify_temp/
